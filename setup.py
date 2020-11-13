@@ -3,7 +3,7 @@ from setuptools import setup
 setup(name="saddle",
     version="0.1",
     scripts=["bin/saddle"],
-    description="Saddle, for tonight we ride!",
+    description="Saddle up, for tonight we ride!",
     url="http://github.com/btoll/saddle",
     author="btoll",
     author_email="benjam72@yahoo.com",
