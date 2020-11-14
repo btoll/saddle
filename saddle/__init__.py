@@ -3,15 +3,15 @@ import functools
 import glob
 import json
 import os
-import re
 import subprocess
 import sys
 import yaml
 
 
-# Note:
-# Because of the way the `mule` package is printing results rather than returning them,
-# we have to do some futzing with the results to work with them.
+# Note!!!
+# We're not importing `mulecli` because it's not yet ready to work as a library.
+# Instead, we're having to call the `mule` binary and do some futzing with the
+# results in order to work with them.
 # This is an area that will change.
 
 def partial(fn, *args):
@@ -24,12 +24,6 @@ def compose(f, g):
     def wrap(*args):
         return f(g(*args))
     return wrap
-
-
-#def compose3(f, g, h):
-#    def wrap(*args):
-#        return f(g(h(*args)))
-#    return wrap
 
 
 def _charset(charset):
@@ -82,13 +76,11 @@ def get_agents(mule_yaml):
     agents = get_cmd_results(["mule", "-f", mule_yaml, "--list-agents"]).replace("\n", " ")
     if agents:
         return agents.split(" ")
-    else:
-        return []
 
 
 @_charset("utf8")
 def get_cmd_results(cmd):
-    return run_cmd(cmd).strip()
+    return subprocess.check_output(cmd).strip()
 
 
 def get_files():
@@ -99,7 +91,8 @@ def get_files():
 
 
 def get_job_env(mule_yaml, mule_job):
-    return get_cmd_results(["mule", "-f", mule_yaml, "--list-env", mule_job, "--verbose"])
+    res = get_cmd_results(["mule", "-f", mule_yaml, "--list-env", mule_job, "--verbose"])
+    return yaml.safe_load(res)
 
 
 def get_jobs(mule_yaml):
@@ -111,13 +104,22 @@ def get_json(o):
     return json.dumps(o, sort_keys=True, indent=4)
 
 
-def get_state(mule_agent):
-    # Strip off the first line to just get the key=value pairs.
-    items = re.sub("agent.*\n", "", mule_agent)
+def get_mule_state(mule_yaml, mule_job):
+    mule_agents = get_agents(mule_yaml)
+    mule_state = []
+    if mule_agents:
+        mule_job_env = get_job_env(mule_yaml, mule_job)
+        mule_state = get_state(mule_job_env)
+    return mule_state
+
+
+def get_state(mule_job_env):
+    print(f"Environment variables for job:\n")
+    # To avoid duplicate env vars, we first collect the agents' envs into
+    # a set in case there is more than one.
+    items = { item for agent in mule_job_env for item in mule_job_env[agent] }
     env_state = []
-    # This is wonky, but we need to trim the newlines from either side of the string before we then
-    # split by the internal newlines :)
-    for item in items.strip("\n").split("\n"):
+    for item in items:
         [key, value] = item.split("=")
         parsed = os.path.expandvars(value)
         # If `parsed` starts with "$", then we know that it is an undefined env var.
@@ -130,7 +132,7 @@ def get_state(mule_agent):
             parsed and not v or
             parsed and v or
             not parsed and v
-        ):
+            ):
             env_state.append("=".join((key, v or parsed)))
     return env_state
 
@@ -148,13 +150,28 @@ def magic_number(filename):
         return fp.read(6) == "#!mule"
 
 
-def run_cmd(cmd):
-    return subprocess.check_output(cmd)
-
-
 def warnings(item):
     # Ignore blank lines and `mule` warnings from undefined environment variables.
     return not (not len(item) or item.find("Could not") > -1)
+
+
+def write_recipe(mule_yaml, mule_job, mule_state):
+    filename = input(f"\nName of outfile: ")
+    [basename, ext] = os.path.splitext(filename)
+    state = {
+        "created": str(datetime.datetime.now()),
+        "version": get_cmd_results(["mule", "-v"]),
+        "file": "/".join((os.getcwd(), mule_yaml)),
+        "job": mule_job,
+        "env": mule_state
+    }
+    if filename.endswith(".*"):
+        for (ext, fn) in extensions.items():
+            create_outfile(state, "".join((basename, ext)), fn)
+    else:
+        # Default to yaml if there is an unrecognized file extension
+        # or if there is no file extension.
+        create_outfile(state, filename, extensions.get(ext, get_yaml))
 
 
 def write_to_file(out, filename):
@@ -180,32 +197,12 @@ get_mule_job = compose(choose_job, get_jobs)
 def main():
     _, mule_yaml = get_mule_yaml()
     _, mule_job = get_mule_job(mule_yaml)
-    mule_agents = get_agents(mule_yaml)
-    mule_state = []
-    if len(mule_agents):
-        mule_job_env = get_job_env(mule_yaml, mule_job)
-        print(f"\nEnv found in {mule_job}:\n")
-        mule_state = get_state(mule_job_env)
+    mule_state = get_mule_state(mule_yaml, mule_job)
     idx, _ = choose_operation(["Run", "Save as recipe"])
     if idx == 0:
         print(" ".join(mule_state + [f"mule -f {mule_yaml} {mule_job}"]))
     else:
-        filename = input(f"\nName of outfile: ")
-        [basename, ext] = os.path.splitext(filename)
-        state = {
-            "created": str(datetime.datetime.now()),
-            "version": get_cmd_results(["mule", "-v"]),
-            "file": "/".join((os.getcwd(), mule_yaml)),
-            "job": mule_job,
-            "env": mule_state
-        }
-        if filename.endswith(".*"):
-            for (ext, fn) in extensions.items():
-                create_outfile(state, "".join((basename, ext)), fn)
-        else:
-            # Default to yaml if there is an unrecognized file extension
-            # or if there is no file extension.
-            create_outfile(state, filename, extensions.get(ext, get_yaml))
+        write_recipe(mule_yaml, mule_job, mule_state)
 
 
 if __name__ == "__main__":
