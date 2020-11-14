@@ -1,4 +1,5 @@
 import datetime
+import functools
 import glob
 import json
 import os
@@ -15,6 +16,7 @@ import yaml
 
 def _charset(charset):
     def decoder(f):
+        @functools.wraps(f)
         def wrap(*args):
             out = f(*args)
             return out.decode(charset)
@@ -23,6 +25,7 @@ def _charset(charset):
 
 
 def _validate_list_choice(f):
+    @functools.wraps(f)
     def wrap(*args):
         (choice, filename) = f(*args)
         items = args[0]
