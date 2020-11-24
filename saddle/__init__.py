@@ -152,17 +152,16 @@ def get_mule_config(mule_yaml):
 
 def get_mule_state(job_config):
     agents = job_config["agents"]
+    state = {
+        "created": str(datetime.datetime.now()),
+        "mule_version": get_cmd_results(["mule", "-v"]),
+        "file": "/".join((os.getcwd(), job_config["filename"])),
+        "job": job_config["job_name"]
+    }
     if agents:
         mule_job_env = get_job_env(agents)
-        return {
-            "created": str(datetime.datetime.now()),
-            "version": get_cmd_results(["mule", "-v"]),
-            "file": "/".join((os.getcwd(), job_config["filename"])),
-            "job": job_config["job_name"],
-            "env": choose_job_env(mule_job_env)
-        }
-    else:
-        return {}
+        state["env"] = choose_job_env(mule_job_env)
+    return state
 
 
 def get_yaml(o):
@@ -179,8 +178,10 @@ def magic_number(filename):
 
 
 def run_selected_job(mule_state):
-    print(" ".join(mule_state["env"] + [f"mule -f {os.path.basename(mule_state['file'])} {mule_state['job']}"]))
-    return get_cmd_results(mule_state["env"] + ["mule", "-f", os.path.basename(mule_state['file']), mule_state["job"]])
+#    print(" ".join(mule_state["env"] + [f"mule -f {os.path.basename(mule_state['file'])} {mule_state['job']}"]))
+#    return get_cmd_results(mule_state["env"] + ["mule", "-f", os.path.basename(mule_state['file']), mule_state["job"]])
+    print(f"mule -f {os.path.basename(mule_state['file'])} {mule_state['job']}")
+    return get_cmd_results(["mule", "-f", os.path.basename(mule_state['file']), mule_state["job"]])
 
 
 def warnings(item):
@@ -248,7 +249,7 @@ def main():
             get_state)
 
     if choose_operation(["Run", "Save as recipe"]) == "Run":
-        run_job()
+        print(run_job())
     else:
         write_job()
 
