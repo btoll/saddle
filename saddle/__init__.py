@@ -7,7 +7,6 @@ import subprocess
 import sys
 import yaml
 
-
 # Note!!!
 # We're not importing `mulecli` because it's not yet ready to work as a library.
 # Instead, we're having to call the `mule` binary and do some futzing with the
@@ -156,7 +155,9 @@ def get_mule_state(job_config):
         "created": str(datetime.datetime.now()),
         "mule_version": get_cmd_results(["mule", "-v"]),
         "file": "/".join((os.getcwd(), job_config["filename"])),
-        "job": job_config["job_name"]
+        "job": job_config["job_name"],
+        "tasks": job_config["tasks"],
+        "agents": [ agent["name"] for agent in agents ]
     }
     if agents:
         mule_job_env = get_job_env(agents)
