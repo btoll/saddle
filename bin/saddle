@@ -1,9 +1,0 @@
-#!/usr/bin/env python3
-
-import saddle
-
-
-if __name__ == "__main__":
-    saddle.main()
-
-
