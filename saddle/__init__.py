@@ -7,11 +7,11 @@ import subprocess
 import sys
 import yaml
 
+
 # Note!!!
 # We're not importing `mulecli` because it's not yet ready to work as a library.
 # Instead, we're having to call the `mule` binary and do some futzing with the
 # results in order to work with them.
-# This is an area that will change.
 
 
 def compose(*fs):
@@ -77,7 +77,7 @@ def choose_job_env(mule_job_env):
             parsed and not v or
             parsed and v or
             not parsed and v
-            ):
+        ):
             env_state.append("=".join((key, v or parsed)))
     return env_state
 
@@ -101,33 +101,36 @@ def get_files():
     return yamls
 
 
-def get_job_config(mule_config, mule_job):
-    job_tasks = mule_config["jobs"][mule_job]["tasks"]
+def get_job_config(mule_config, job):
+    job_def = mule_config["jobs"].get(job)
+    job_configs = job_def.get("configs", {})
+    tasks = job_def.get("tasks", [])
+    task_configs = []
     agents = []
-    for job_task in job_tasks:
-        for task in mule_config["tasks"]:
-            if "name" in task:
-                name = ".".join((task["task"], task["name"]))
-            else:
-                name = task["task"]
-            # Recall not all tasks have an agent!
-            if "agent" in task and job_task == name:
-                agent = task["agent"]
-                for item in mule_config["agents"]:
-                    if agent == item["name"]:
-                        agents.append(item)
+    for job_task in tasks:
+        name, task = get_task(mule_config, job_task)
+        task_configs.append(task)
+        if "dependencies" in task:
+            for dependency in task["dependencies"]:
+                _, task = get_task(mule_config, dependency)
+                task_configs.append(task)
+        # Recall not all tasks have an agent!
+        if "agent" in task and job_task == name:
+            agents = [item for item in mule_config["agents"] if task["agent"] == item["name"]]
     return {
         "filename": mule_config["filename"],
-        "job_name": mule_job,
+        "name": job,
+        "configs": job_configs,
         "agents": agents,
-        "tasks": job_tasks,
+        "tasks": tasks,
+        "task_configs": task_configs,
     }
 
 
 def get_job_env(agents):
     # To avoid duplicate env vars, we collect the agents' envs
     # into a set in case the agents share env vars.
-    return { env for agent in agents for env in agent["env"] }
+    return {env for agent in agents for env in agent["env"]}
 
 
 def get_jobs(mule_yaml):
@@ -155,14 +158,27 @@ def get_mule_state(job_config):
         "created": str(datetime.datetime.now()),
         "mule_version": get_cmd_results(["mule", "-v"]),
         "file": "/".join((os.getcwd(), job_config["filename"])),
-        "job": job_config["job_name"],
+        "job": job_config["name"],
+        "configs": job_config["configs"],
         "tasks": job_config["tasks"],
-        "agents": [ agent["name"] for agent in agents ]
+        "task_configs": job_config["task_configs"],
+        "agents": agents
     }
-    if agents:
+    if len(agents):
         mule_job_env = get_job_env(agents)
-        state["env"] = choose_job_env(mule_job_env)
+        for agent in agents:
+            agent["env"] = choose_job_env(mule_job_env)
     return state
+
+
+def get_task(mule_config, job_task):
+    for task in mule_config["tasks"]:
+        if "name" in task:
+            name = ".".join((task["task"], task["name"]))
+        else:
+            name = task["task"]
+        if name == job_task:
+            return name, task
 
 
 def get_yaml(o):
@@ -179,8 +195,6 @@ def magic_number(filename):
 
 
 def run_selected_job(mule_state):
-#    print(" ".join(mule_state["env"] + [f"mule -f {os.path.basename(mule_state['file'])} {mule_state['job']}"]))
-#    return get_cmd_results(mule_state["env"] + ["mule", "-f", os.path.basename(mule_state['file']), mule_state["job"]])
     print(f"mule -f {os.path.basename(mule_state['file'])} {mule_state['job']}")
     return get_cmd_results(["mule", "-f", os.path.basename(mule_state['file']), mule_state["job"]])
 
@@ -257,5 +271,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
