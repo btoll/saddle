@@ -9,9 +9,6 @@ import sys
 import yaml
 
 
-import pprint
-import ipdb
-
 # Note!!!
 # We're not importing `mulecli` because it's not yet ready to work as a library.
 # Instead, we're having to call the `mule` binary and do some futzing with the
@@ -70,7 +67,7 @@ def _validate(f):
 def choose_input(name, items):
     for item in list_items(items):
         print(item)
-    print("\n( To select all jobs, enter in 1 more than the highest-numbered item. )")
+    print(f"\n( To select all {name}, enter in 1 more than the highest-numbered item. )")
     choice = input(f"\nChoose {name}: ")
     # TODO: Probably need to trim as well.
     return list(map(int, choice.split(",")))
@@ -78,22 +75,16 @@ def choose_input(name, items):
 
 def choose_job_env(mule_job_env):
     print(f"Environment variables for job:\n")
-    env_state = []
-    for item in mule_job_env:
-        [key, value] = item.split("=")
-        parsed = os.path.expandvars(value)
-        # If `parsed` starts with "$", then we know that it is an undefined env var.
+    env_state = {}
+    for key, value in mule_job_env.items():
+        evald = os.path.expandvars(value)
+        # If `parsed` starts with "$", then we know that it is an undefined env var
+        # and could not be parsed.
         # In this case, we don't want to display anything as a default value.
-        if parsed.startswith("$"):
-            parsed = ""
-        v = input(f"{key} [{parsed}]: ")
-        # TODO: This is just disgusting :)
-        if (
-            parsed and not v or
-            parsed and v or
-            not parsed and v
-        ):
-            env_state.append("=".join((key, v or parsed)))
+        if evald.startswith("$"):
+            evald = ""
+        v = input(f"{key} [{evald}]: ")
+        env_state[key] = v or evald
     return env_state
 
 
@@ -150,9 +141,13 @@ def get_job_config(mule_config, jobs):
 
 
 def get_job_env(agents):
-    # To avoid duplicate env vars, we collect the agents' envs
-    # into a set in case the agents share env vars.
-    return {env for agent in agents for env in agent["env"]}
+    # This is used twice:
+    #   1. To avoid duplicate env vars, we collect the agents' envs
+    #      into a set in case the agents share env vars.
+    #   2. For individual agent to convert a list to a dict
+    #      (`env` blocks can be defined as either lists or dicts).
+#    return {env for agent in agents for env in agent["env"]}
+    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
 
 
 def get_jobs(mule_yaml):
@@ -176,7 +171,6 @@ def get_mule_config(mule_yaml):
 
 
 def get_mule_state(job_config):
-    ipdb.set_trace()
     state = {
         "created": str(datetime.datetime.now()),
         "mule_version": get_cmd_results(["mule", "-v"]),
@@ -184,13 +178,22 @@ def get_mule_state(job_config):
         "filename": "/".join((os.getcwd(), job_config[0]["filename"])),
         "items": []
     }
+    agents = []
     for j_c in job_config:
-        agents = j_c["agents"]
+        if len(j_c["agents"]):
+            agents += j_c["agents"]
         state["items"].append(j_c)
-        if len(agents):
-            mule_job_env = get_job_env(agents)
-            for agent in agents:
-                agent["env"] = choose_job_env(mule_job_env)
+    if len(agents):
+        mule_job_env = get_job_env(agents)
+    env = choose_job_env(mule_job_env)
+    for agent in agents:
+        if "env" in agent:
+            # Agent env blocks could be either lists or dicts. We only want
+            # to work with the latter.
+            agent_env = agent if type(agent["env"]) is dict else get_job_env([agent])
+            # We only want truthy values (no empty strings). These will then
+            # be looked up from our unique (non-duplicates) `env` dict.
+            agent["env"] = {key: env[key] for key in agent_env.keys() if key in env and env[key]}
     return state
 
 
