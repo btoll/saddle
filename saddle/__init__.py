@@ -1,3 +1,4 @@
+import copy
 import datetime
 import functools
 import glob
@@ -7,6 +8,9 @@ import subprocess
 import sys
 import yaml
 
+
+import pprint
+import ipdb
 
 # Note!!!
 # We're not importing `mulecli` because it's not yet ready to work as a library.
@@ -32,13 +36,20 @@ def _charset(charset):
     return decoder
 
 
-def _get_list_item(f):
-    @functools.wraps(f)
-    def wrap(*args):
-        items = args[1]
-        choice = f(*args)
-        return items[choice]
-    return wrap
+#def _get_list_item(f):
+#    @functools.wraps(f)
+#    def wrap(*args):
+#        items = args[1]
+#        choice = f(*args)
+#        return items[choice]
+#    return wrap
+
+
+def _get_list_item(items, n):
+    if 0 < n <= len(items):
+        return items[n - 1]
+    else:
+        raise ValueError(f"Selection `{n}` out of range")
 
 
 def _validate(f):
@@ -46,19 +57,23 @@ def _validate(f):
     def wrap(*args):
         items = args[1]
         choice = f(*args)
-        if -1 < choice < len(items):
-            return choice
+        if len(choice) == 1 and choice[0] == len(items) + 1:
+            # All jobs were selected so return the entire list.
+            return items
         else:
-            raise ValueError("Out of range")
+            return list(map(functools.partial(_get_list_item, items), choice))
     return wrap
 
 
-@_get_list_item
+#@_get_list_item
 @_validate
 def choose_input(name, items):
     for item in list_items(items):
         print(item)
-    return int(input(f"\nChoose {name}: ")) - 1
+    print("\n( To select all jobs, enter in 1 more than the highest-numbered item. )")
+    choice = input(f"\nChoose {name}: ")
+    # TODO: Probably need to trim as well.
+    return list(map(int, choice.split(",")))
 
 
 def choose_job_env(mule_job_env):
@@ -89,6 +104,10 @@ def create_outfile(state, filename, fn):
     print(out)
 
 
+def first(l):
+    return l[0]
+
+
 @_charset("utf8")
 def get_cmd_results(cmd):
     return subprocess.check_output(cmd).strip()
@@ -101,30 +120,33 @@ def get_files():
     return yamls
 
 
-def get_job_config(mule_config, job):
-    job_def = mule_config["jobs"].get(job)
-    job_configs = job_def.get("configs", {})
-    tasks = job_def.get("tasks", [])
-    task_configs = []
-    agents = []
-    for job_task in tasks:
-        name, task = get_task(mule_config, job_task)
-        task_configs.append(task)
-        if "dependencies" in task:
-            for dependency in task["dependencies"]:
-                _, task = get_task(mule_config, dependency)
-                task_configs.append(task)
-        # Recall not all tasks have an agent!
-        if "agent" in task and job_task == name:
-            agents = [item for item in mule_config["agents"] if task["agent"] == item["name"]]
-    return {
-        "filename": mule_config["filename"],
-        "name": job,
-        "configs": job_configs,
-        "agents": agents,
-        "tasks": tasks,
-        "task_configs": task_configs,
-    }
+def get_job_config(mule_config, jobs):
+    j = []
+    for job in jobs:
+        job_def = mule_config["jobs"].get(job)
+        job_configs = job_def.get("configs", {})
+        tasks = job_def.get("tasks", [])
+        task_configs = []
+        agents = []
+        for job_task in tasks:
+            name, task = get_task(mule_config, job_task)
+            task_configs.append(task)
+            if "dependencies" in task:
+                for dependency in task["dependencies"]:
+                    _, task = get_task(mule_config, dependency)
+                    task_configs.append(task)
+            # Recall not all tasks have an agent!
+            if "agent" in task and job_task == name:
+                agents = [item for item in mule_config["agents"] if task["agent"] == item["name"]]
+        j.append({
+            "filename": mule_config["filename"],
+            "name": job,
+            "configs": copy.deepcopy(job_configs),
+            "agents": copy.deepcopy(agents),
+            "tasks": tasks,
+            "task_configs": copy.deepcopy(task_configs)
+        })
+    return j
 
 
 def get_job_env(agents):
@@ -134,7 +156,7 @@ def get_job_env(agents):
 
 
 def get_jobs(mule_yaml):
-    jobs = get_cmd_results(["mule", "-f", mule_yaml, "--list-jobs"])
+    jobs = get_cmd_results(["mule", "-f", first(mule_yaml), "--list-jobs"])
     return list(filter(warnings, jobs.split("\n")))
 
 
@@ -143,31 +165,32 @@ def get_json(o):
 
 
 def get_mule_config(mule_yaml):
-    with open(mule_yaml, "r") as fp:
+    filename = first(mule_yaml)
+    with open(filename, "r") as fp:
         mule = yaml.safe_load(fp.read())
         # This is kind of a cheat, but if we tack on the filename we won't
         # need to pass it along in as part of a compose pipeline (or curry
         # another function).
-        mule["filename"] = mule_yaml
+        mule["filename"] = filename
         return mule
 
 
 def get_mule_state(job_config):
-    agents = job_config["agents"]
+    ipdb.set_trace()
     state = {
         "created": str(datetime.datetime.now()),
         "mule_version": get_cmd_results(["mule", "-v"]),
-        "file": "/".join((os.getcwd(), job_config["filename"])),
-        "job": job_config["name"],
-        "configs": job_config["configs"],
-        "tasks": job_config["tasks"],
-        "task_configs": job_config["task_configs"],
-        "agents": agents
+        # TODO: Figure out a better way to do this!
+        "filename": "/".join((os.getcwd(), job_config[0]["filename"])),
+        "items": []
     }
-    if len(agents):
-        mule_job_env = get_job_env(agents)
-        for agent in agents:
-            agent["env"] = choose_job_env(mule_job_env)
+    for j_c in job_config:
+        agents = j_c["agents"]
+        state["items"].append(j_c)
+        if len(agents):
+            mule_job_env = get_job_env(agents)
+            for agent in agents:
+                agent["env"] = choose_job_env(mule_job_env)
     return state
 
 
@@ -192,11 +215,6 @@ def list_items(items):
 def magic_number(filename):
     with open(filename, "r") as fp:
         return fp.read(6) == "#!mule"
-
-
-def run_selected_job(mule_state):
-    print(f"mule -f {os.path.basename(mule_state['file'])} {mule_state['job']}")
-    return get_cmd_results(["mule", "-f", os.path.basename(mule_state['file']), mule_state["job"]])
 
 
 def warnings(item):
@@ -229,7 +247,6 @@ extensions = {
 
 choose_file = functools.partial(choose_input, "file")
 choose_job = functools.partial(choose_input, "job")
-choose_operation = functools.partial(choose_input, "operation")
 get_mule_yaml = compose(choose_file, get_files)
 
 
@@ -255,18 +272,11 @@ def main():
             get_mule_state,
             job_config)
 
-    run_job = compose(
-            run_selected_job,
-            get_state)
-
     write_job = compose(
             write_recipe,
             get_state)
 
-    if choose_operation(["Run", "Save as recipe"]) == "Run":
-        print(run_job())
-    else:
-        write_job()
+    write_job()
 
 
 if __name__ == "__main__":
