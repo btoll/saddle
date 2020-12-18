@@ -9,7 +9,6 @@ import subprocess
 import sys
 import yaml
 
-import ipdb
 
 # Note!!!
 # We're not importing `mulecli` because it's not yet ready to work as a library.
@@ -96,6 +95,16 @@ def choose_job_env(mule_job_env):
     return env_state
 
 
+def compile(stream, to_yaml=True):
+    recipe = load_yaml(stream)
+    state = get_mule_state(
+        get_job_config(
+            get_mule_config(recipe["filename"]),
+            recipe["jobs"]),
+        recipe)
+    return get_yaml(state) if to_yaml else state
+
+
 def create_abs_path_filename(filename):
     return "/".join((os.getcwd(), filename))
 
@@ -103,8 +112,7 @@ def create_abs_path_filename(filename):
 def create_outfile(state, filename, fn):
     out = fn(state)
     write_to_file(out, filename)
-    print(f"\nFile written to {create_abs_path_filename(filename)}\n")
-    print(out)
+    print(f"File written to {create_abs_path_filename(filename)}")
 
 
 def first(l):
@@ -158,7 +166,6 @@ def get_env_union(agents):
     #      into a set in case the agents share env vars.
     #   2. For individual agent to convert a list to a dict
     #      (`env` blocks can be defined as either lists or dicts).
-#    return {env for agent in agents for env in agent["env"]}
     return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
 
 
@@ -183,7 +190,7 @@ def get_mule_config(filename):
 
 def get_mule_state(job_config, recipe):
     state = {
-        "created": str(datetime.datetime.now()),
+        "created": datetime.datetime.now(),
         "mule_version": get_cmd_results(["mule", "-v"]),
         # TODO: Figure out a better way to do this!
         "filename": "/".join((os.getcwd(), job_config[0]["filename"])),
@@ -194,9 +201,6 @@ def get_mule_state(job_config, recipe):
         if len(j_c["agents"]):
             agents += j_c["agents"]
         state["items"].append(j_c)
-#    if len(agents):
-#        mule_job_env = get_env_union(agents)
-#    env = choose_job_env(mule_job_env)
     env = recipe["env"]
     for agent in agents:
         if "env" in agent:
@@ -272,7 +276,6 @@ def magic_number(filename):
 
 
 def make_recipe(fields):
-    ipdb.set_trace()
     return {
         "created": datetime.datetime.now(),
         "mule_version": get_cmd_results(["mule", "-v"]),
@@ -288,7 +291,7 @@ def warnings(item):
 
 
 def write_recipe(mule_state):
-    filename = input(f"\nName of outfile: ")
+    filename = input(f"Name of outfile: ")
     [basename, ext] = os.path.splitext(filename)
     if filename.endswith(".*"):
         for (ext, fn) in extensions.items():
@@ -322,30 +325,16 @@ def init():
 
 def main():
     if args.recipe:
-        recipe = load_yaml(args.recipe)
-        mule_config = get_mule_config(recipe["filename"])
-        job_config = get_job_config(mule_config, recipe["jobs"])
-        state = get_mule_state(job_config, recipe)
         if args.stdout:
-            print(state)
+            print(compile(args.recipe))
         else:
-            write_recipe(state)
-
-#        job_config = compose(
-#                functools.partial(get_job_config, get_config()),
-#                get_mule_job)
-#
-#        get_state = compose(
-#                get_mule_state,
-#                job_config)
-#
-#        write_job = compose(
-#                write_recipe,
-#                get_state)
-
+            write_recipe(compile(args.recipe, to_yaml=False))
     else:
         get_mule_filename = init()
-        get_config = compose(get_mule_config, first, get_mule_filename)
+        get_config = compose(
+                get_mule_config,
+                first,
+                get_mule_filename)
 
         get_mule_jobs = compose(
                 choose_job,
