@@ -40,15 +40,6 @@ def _charset(charset):
     return decoder
 
 
-#def _get_list_item(f):
-#    @functools.wraps(f)
-#    def wrap(*args):
-#        items = args[1]
-#        choice = f(*args)
-#        return items[choice]
-#    return wrap
-
-
 def _get_list_item(items, n):
     if 0 < n <= len(items):
         return items[n - 1]
@@ -69,7 +60,6 @@ def _validate(f):
     return wrap
 
 
-#@_get_list_item
 @_validate
 def choose_input(name, items):
     for item in list_items(items):
@@ -124,6 +114,15 @@ def get_cmd_results(cmd):
     return subprocess.check_output(cmd).strip()
 
 
+def get_env_union(agents):
+    # This is used twice:
+    #   1. To avoid duplicate env vars, we collect the agents' envs
+    #      into a set in case the agents share env vars.
+    #   2. For individual agent to convert a list to a dict
+    #      (`env` blocks can be defined as either lists or dicts).
+    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
+
+
 def get_files():
     yamls = list(filter(magic_number, glob.glob("*.yaml")))
     if not len(yamls):
@@ -132,24 +131,32 @@ def get_files():
 
 
 def get_job_config(mule_config, jobs):
-    j = []
+    job_state = get_job_state(mule_config, jobs)
+    return job_state.get("job_state")
+
+
+def get_job_state(mule_config, jobs):
+    agents = []
+    job_state = []
+    mule_agents = mule_config.get("agents", [])
+    task_configs = []
     for job in jobs:
         job_def = mule_config["jobs"].get(job)
         job_configs = job_def.get("configs", {})
         tasks = job_def.get("tasks", [])
-        task_configs = []
-        agents = []
         for job_task in tasks:
-            name, task = get_task(mule_config, job_task)
+            task = get_task(mule_config, job_task)
             task_configs.append(task)
-            if "dependencies" in task:
-                for dependency in task["dependencies"]:
-                    _, task = get_task(mule_config, dependency)
-                    task_configs.append(task)
-            # Recall not all tasks have an agent!
-            if "agent" in task and job_task == name:
-                agents = [item for item in mule_config["agents"] if task["agent"] == item["name"]]
-        j.append({
+            for dependency in task.get("dependencies", []):
+                task = get_task(mule_config, dependency)
+                task_configs.append(task)
+        if len(mule_agents):
+            all_agents = {}
+            for agent in mule_agents:
+                all_agents[agent.get("name")] = agent
+            agents_names = list({task.get("agent") for task in task_configs if task.get("agent")})
+            agents = [all_agents[name] for name in agents_names]
+        job_state.append({
             "filename": mule_config["filename"],
             "name": job,
             "configs": copy.deepcopy(job_configs),
@@ -157,16 +164,11 @@ def get_job_config(mule_config, jobs):
             "tasks": tasks,
             "task_configs": copy.deepcopy(task_configs)
         })
-    return j
-
-
-def get_env_union(agents):
-    # This is used twice:
-    #   1. To avoid duplicate env vars, we collect the agents' envs
-    #      into a set in case the agents share env vars.
-    #   2. For individual agent to convert a list to a dict
-    #      (`env` blocks can be defined as either lists or dicts).
-    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
+    return {
+        "agents": agents,
+        "job_state": job_state,
+        "task_configs": task_configs,
+    }
 
 
 def get_jobs(mule_yaml):
@@ -203,7 +205,7 @@ def get_mule_state(job_config, recipe):
         state["items"].append(j_c)
     env = recipe["env"]
     for agent in agents:
-        if "env" in agent:
+        if agent.get("env"):
             # Agent env blocks could be either lists or dicts. We only want
             # to work with the latter.
             agent_env = agent if type(agent["env"]) is dict else get_env_union([agent])
@@ -223,28 +225,12 @@ def get_recipe_env(fields):
 
 
 def get_recipe_fields(mule_config, jobs):
-    j = []
-    agents = []
-    task_configs = []
-    for job in jobs:
-        job_def = mule_config["jobs"].get(job)
-        job_configs = job_def.get("configs", {})
-        tasks = job_def.get("tasks", [])
-        for job_task in tasks:
-            name, task = get_task(mule_config, job_task)
-            task_configs.append(task)
-            if "dependencies" in task:
-                for dependency in task["dependencies"]:
-                    _, task = get_task(mule_config, dependency)
-                    task_configs.append(task)
-            # Recall not all tasks have an agent!
-            if "agent" in task and job_task == name:
-                agents = [item for item in mule_config["agents"] if task["agent"] == item["name"]]
+    job_state = get_job_state(mule_config, jobs)
     return {
         "filename": create_abs_path_filename(mule_config["filename"]),
         "jobs": jobs,
-        "tasks": task_configs,
-        "agents": agents
+        "tasks": job_state.get("task_configs"),
+        "agents": job_state.get("agents")
     }
 
 
@@ -255,7 +241,7 @@ def get_task(mule_config, job_task):
         else:
             name = task["task"]
         if name == job_task:
-            return name, task
+            return task
 
 
 def get_yaml(o):
