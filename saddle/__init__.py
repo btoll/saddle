@@ -88,10 +88,10 @@ def choose_job_env(mule_job_env):
 def compile(stream, to_yaml=True):
     recipe = load_yaml(stream)
     state = get_mule_state(
-        get_job_config(
+        get_jobs_state(
             get_mule_config(recipe["filename"]),
-            recipe["jobs"]),
-        recipe)
+            recipe["jobs"]
+        ), recipe)
     return get_yaml(state) if to_yaml else state
 
 
@@ -130,12 +130,7 @@ def get_files():
     return yamls
 
 
-def get_job_config(mule_config, jobs):
-    job_state = get_job_state(mule_config, jobs)
-    return job_state.get("job_state")
-
-
-def get_job_state(mule_config, jobs):
+def get_jobs_state(mule_config, jobs):
     agents = []
     job_state = []
     mule_agents = mule_config.get("agents", [])
@@ -195,11 +190,11 @@ def get_mule_state(job_config, recipe):
         "created": datetime.datetime.now(),
         "mule_version": get_cmd_results(["mule", "-v"]),
         # TODO: Figure out a better way to do this!
-        "filename": "/".join((os.getcwd(), job_config[0]["filename"])),
+        "filename": "/".join((os.getcwd(), job_config.get("job_state")[0].get("filename"))),
         "items": []
     }
     agents = []
-    for j_c in job_config:
+    for j_c in job_config.get("job_state"):
         if len(j_c["agents"]):
             agents += j_c["agents"]
         state["items"].append(j_c)
@@ -225,7 +220,7 @@ def get_recipe_env(fields):
 
 
 def get_recipe_fields(mule_config, jobs):
-    job_state = get_job_state(mule_config, jobs)
+    job_state = get_jobs_state(mule_config, jobs)
     return {
         "filename": create_abs_path_filename(mule_config["filename"]),
         "jobs": jobs,
