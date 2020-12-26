@@ -85,6 +85,11 @@ def choose_job_env(mule_job_env):
     return env_state
 
 
+@_charset("utf8")
+def cmd_results(cmd):
+    return subprocess.check_output(cmd).strip()
+
+
 def compile(stream, to_yaml=True):
     recipe = load_yaml(stream)
     state = get_mule_state(
@@ -109,9 +114,20 @@ def first(l):
     return l[0]
 
 
-@_charset("utf8")
-def get_cmd_results(cmd):
-    return subprocess.check_output(cmd).strip()
+def get_agent_configs(mule_config, jobs):
+    agent_configs = get_all_agent_configs(mule_config.get("agents", []), jobs)
+    if agent_configs:
+        agents_names = list({task.get("agent") for task in get_task_configs(mule_config, jobs) if task.get("agent")})
+        return [agent_configs[name] for name in agents_names]
+    else:
+        return []
+
+
+def get_all_agent_configs(mule_agents, jobs):
+    if len(mule_agents):
+        return {agent.get("name"): agent for agent in mule_agents}
+    else:
+        return {}
 
 
 def get_env_union(agents):
@@ -123,20 +139,14 @@ def get_env_union(agents):
     return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
 
 
-def get_files():
-    yamls = list(filter(magic_number, glob.glob("*.yaml")))
-    if not len(yamls):
-        raise Exception(f"No `mule` files found in {os.getcwd()}>")
-    return yamls
-
-
 def get_jobs_state(mule_config, jobs):
     agents = []
     job_state = []
     mule_agents = mule_config.get("agents", [])
-    task_configs = []
+    all_agent_configs = get_all_agent_configs(mule_agents, jobs)
     for job in jobs:
-        job_def = mule_config["jobs"].get(job)
+        task_configs = []
+        job_def = mule_config.get("jobs").get(job)
         job_configs = job_def.get("configs", {})
         tasks = job_def.get("tasks", [])
         for job_task in tasks:
@@ -145,29 +155,29 @@ def get_jobs_state(mule_config, jobs):
             for dependency in task.get("dependencies", []):
                 task = get_task(mule_config, dependency)
                 task_configs.append(task)
-        if len(mule_agents):
-            all_agents = {}
-            for agent in mule_agents:
-                all_agents[agent.get("name")] = agent
-            agents_names = list({task.get("agent") for task in task_configs if task.get("agent")})
-            agents = [all_agents[name] for name in agents_names]
+        # TODO: Check for agents?
+        agents_names = list({task.get("agent") for task in task_configs if task.get("agent")})
+        agents = [all_agent_configs[name] for name in agents_names]
         job_state.append({
-            "filename": mule_config["filename"],
+            "filename": mule_config.get("filename"),
             "name": job,
             "configs": copy.deepcopy(job_configs),
             "agents": copy.deepcopy(agents),
             "tasks": tasks,
             "task_configs": copy.deepcopy(task_configs)
         })
-    return {
-        "agents": agents,
-        "job_state": job_state,
-        "task_configs": task_configs,
-    }
+    return job_state
+
+
+def get_mule_files():
+    yamls = list(filter(magic_number, glob.glob("*.yaml")))
+    if not len(yamls):
+        raise Exception(f"No `mule` files found in {os.getcwd()}>")
+    return yamls
 
 
 def get_jobs(mule_yaml):
-    jobs = get_cmd_results(["mule", "-f", first(mule_yaml), "--list-jobs"])
+    jobs = cmd_results(["mule", "-f", first(mule_yaml), "--list-jobs"])
     return list(filter(warnings, jobs.split("\n")))
 
 
@@ -185,16 +195,16 @@ def get_mule_config(filename):
         return mule
 
 
-def get_mule_state(job_config, recipe):
+def get_mule_state(jobs_state, recipe):
     state = {
         "created": datetime.datetime.now(),
-        "mule_version": get_cmd_results(["mule", "-v"]),
+        "mule_version": cmd_results(["mule", "-v"]),
         # TODO: Figure out a better way to do this!
-        "filename": "/".join((os.getcwd(), job_config.get("job_state")[0].get("filename"))),
+        "filename": "/".join((os.getcwd(), jobs_state[0].get("filename"))),
         "items": []
     }
     agents = []
-    for j_c in job_config.get("job_state"):
+    for j_c in jobs_state:
         if len(j_c["agents"]):
             agents += j_c["agents"]
         state["items"].append(j_c)
@@ -210,22 +220,20 @@ def get_mule_state(job_config, recipe):
     return state
 
 
-def get_recipe_env(fields):
-    if len(fields["agents"]):
-        mule_job_env = get_env_union(fields["agents"])
-        fields["env"] = choose_job_env(mule_job_env)
+def get_recipe_env(recipe_fields):
+    if len(recipe_fields["agents"]):
+        mule_job_env = get_env_union(recipe_fields["agents"])
+        recipe_fields["env"] = choose_job_env(mule_job_env)
     else:
-        fields["env"] = []
-    return fields
+        recipe_fields["env"] = []
+    return recipe_fields
 
 
 def get_recipe_fields(mule_config, jobs):
-    job_state = get_jobs_state(mule_config, jobs)
     return {
-        "filename": create_abs_path_filename(mule_config["filename"]),
+        "filename": create_abs_path_filename(mule_config.get("filename")),
         "jobs": jobs,
-        "tasks": job_state.get("task_configs"),
-        "agents": job_state.get("agents")
+        "agents": get_agent_configs(mule_config, jobs)
     }
 
 
@@ -237,6 +245,20 @@ def get_task(mule_config, job_task):
             name = task["task"]
         if name == job_task:
             return task
+
+
+def get_task_configs(mule_config, jobs):
+    # Should we be checking for jobs at this point or assuming we're good?
+    task_configs = []
+    for job in jobs:
+        tasks = mule_config.get("jobs").get(job).get("tasks", [])
+        for job_task in tasks:
+            task = get_task(mule_config, job_task)
+            task_configs.append(task)
+            for dependency in task.get("dependencies", []):
+                task = get_task(mule_config, dependency)
+                task_configs.append(task)
+    return task_configs
 
 
 def get_yaml(o):
@@ -259,7 +281,7 @@ def magic_number(filename):
 def make_recipe(fields):
     return {
         "created": datetime.datetime.now(),
-        "mule_version": get_cmd_results(["mule", "-v"]),
+        "mule_version": cmd_results(["mule", "-v"]),
         "filename": fields["filename"],
         "jobs": fields["jobs"],
         "env": fields["env"]
@@ -296,7 +318,7 @@ extensions = {
 
 choose_file = functools.partial(choose_input, "file")
 choose_job = functools.partial(choose_input, "job")
-get_mule_yaml = compose(choose_file, get_files)
+get_mule_yaml = compose(choose_file, get_mule_files)
 
 
 def init():
