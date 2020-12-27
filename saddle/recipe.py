@@ -5,7 +5,7 @@ import os
 import yaml
 
 
-import saddle.fp
+import saddle.func
 import saddle.util
 
 
@@ -51,13 +51,13 @@ def get_agent_configs(mule_config, jobs):
     agent_configs = saddle.util.get_all_agent_configs(mule_config.get("agents", []), jobs)
     if agent_configs:
         agents_names = list({task.get("agent") for task in get_task_configs(mule_config, jobs) if task.get("agent")})
-        return [agent_configs[name] for name in agents_names]
+        return [agent_configs.get(name) for name in agents_names]
     else:
         return []
 
 
 def get_jobs(mule_yaml):
-    jobs = saddle.util.cmd_results(["mule", "-f", saddle.fp.first(mule_yaml), "--list-jobs"])
+    jobs = saddle.util.cmd_results(["mule", "-f", saddle.func.first(mule_yaml), "--list-jobs"])
     return list(filter(warnings, jobs.split("\n")))
 
 
@@ -77,7 +77,7 @@ def get_mule_files():
 
 def get_env(fields):
     if len(fields["agents"]):
-        mule_job_env = saddle.util.get_env_union(fields["agents"])
+        mule_job_env = saddle.util.get_env_union(fields.get("agents"))
         fields["env"] = choose_job_env(mule_job_env)
     else:
         fields["env"] = []
@@ -119,9 +119,9 @@ def make_recipe(fields):
     return {
         "created": datetime.datetime.now(),
         "mule_version": saddle.util.cmd_results(["mule", "-v"]),
-        "filename": fields["filename"],
-        "jobs": fields["jobs"],
-        "env": fields["env"]
+        "filename": fields.get("filename"),
+        "jobs": fields.get("jobs"),
+        "env": fields.get("env")
      }
 
 
@@ -132,7 +132,7 @@ def warnings(item):
 
 choose_file = functools.partial(choose_input, "file")
 choose_job = functools.partial(choose_input, "job")
-get_mule_yaml = saddle.fp.compose(choose_file, get_mule_files)
+get_mule_yaml = saddle.func.compose(choose_file, get_mule_files)
 
 
 def init():
@@ -142,22 +142,22 @@ def init():
 
 def main():
     get_mule_filename = init()
-    get_config = saddle.fp.compose(
+    get_config = saddle.func.compose(
             saddle.util.get_mule_config,
-            saddle.fp.first,
+            saddle.func.first,
             get_mule_filename)
 
-    get_mule_jobs = saddle.fp.compose(
+    get_mule_jobs = saddle.func.compose(
             choose_job,
             get_jobs,
             get_mule_filename)
 
-    get_recipe_env = saddle.fp.compose(
+    get_recipe_env = saddle.func.compose(
             get_env,
             functools.partial(get_fields, get_config()),
             get_mule_jobs)
 
-    write_job = saddle.fp.compose(
+    write_job = saddle.func.compose(
             saddle.util.write_recipe,
             make_recipe,
             get_recipe_env)

@@ -38,7 +38,7 @@ def get_compiled_state(jobs_state, recipe):
             agent_env = agent if type(agent["env"]) is dict else saddle.util.get_env_union([agent])
             # We only want truthy values (no empty strings). These will then
             # be looked up from our unique (non-duplicates) `env` dict.
-            agent["env"] = {key: env[key] for key in agent_env.keys() if key in env and env[key]}
+            agent["env"] = {key: env.get(key) for key in agent_env.keys() if key in env and env.get(key)}
     return state
 
 
@@ -60,7 +60,7 @@ def get_jobs_state(mule_config, jobs):
                 task_configs.append(task)
         # TODO: Check for agents?
         agents_names = list({task.get("agent") for task in task_configs if task.get("agent")})
-        agents = [all_agent_configs[name] for name in agents_names]
+        agents = [all_agent_configs.get(name) for name in agents_names]
         job_state.append({
             "filename": mule_config.get("filename"),
             "name": job,
