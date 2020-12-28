@@ -23,7 +23,8 @@ def _validate(f):
 
 @_validate
 def _choose_input(name, items):
-    for item in _list_items(items):
+    found_items = ["{}) {}".format(idx + 1, item) for idx, item in enumerate(items)]
+    for item in found_items:
         print(item)
     print(f"\n( To select all {name}, enter in 1 more than the highest-numbered item. )")
     choice = input(f"\nChoose {name}: ")
@@ -44,15 +45,6 @@ def _choose_job_env(mule_job_env):
         v = input(f"{key} [{evald}]: ")
         env_state[key] = v or evald
     return env_state
-
-
-def _get_agent_configs(mule_config, jobs):
-    agent_configs = {agent.get("name"): agent for agent in mule_config.get("agents", [])}
-    if agent_configs:
-        agents_names = list({task.get("agent") for task in _get_task_configs(mule_config, jobs) if task.get("agent")})
-        return [agent_configs.get(name) for name in agents_names]
-    else:
-        return []
 
 
 def _get_env_union(agents):
@@ -79,10 +71,17 @@ def _get_env(fields):
 
 
 def _get_fields(mule_config, jobs):
+    agent_configs = {agent.get("name"): agent for agent in mule_config.get("agents", [])}
+    if agent_configs:
+        agents_names = list({task.get("agent") for task in _get_task_configs(mule_config, jobs) if task.get("agent")})
+        agents = [agent_configs.get(name) for name in agents_names]
+    else:
+        agents = []
+
     return {
         "filename": saddle.util.create_abs_path_filename(mule_config.get("filename")),
         "jobs": jobs,
-        "agents": _get_agent_configs(mule_config, jobs)
+        "agents": agents
     }
 
 
@@ -127,10 +126,6 @@ def _get_task_configs(mule_config, jobs):
 def _init():
     mule_yaml = _get_mule_yaml()
     return lambda: mule_yaml
-
-
-def _list_items(items):
-    return ["{}) {}".format(idx + 1, item) for idx, item in enumerate(items)]
 
 
 def _magic_number(filename):
