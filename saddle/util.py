@@ -24,22 +24,6 @@ def create_abs_path_filename(filename):
     return "/".join((os.getcwd(), filename))
 
 
-def get_all_agent_configs(mule_agents, jobs):
-    if len(mule_agents):
-        return {agent.get("name"): agent for agent in mule_agents}
-    else:
-        return {}
-
-
-def get_env_union(agents):
-    # This is used twice:
-    #   1. To avoid duplicate env vars, we collect the agents' envs
-    #      into a set in case the agents share env vars.
-    #   2. For individual agent to convert a list to a dict
-    #      (`env` blocks can be defined as either lists or dicts).
-    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
-
-
 def get_json(o):
     return json.dumps(o, sort_keys=True, indent=4)
 
@@ -52,16 +36,6 @@ def get_mule_config(filename):
         # another function).
         mule["filename"] = filename
         return mule
-
-
-def get_task(mule_config, job_task):
-    for task in mule_config["tasks"]:
-        if "name" in task:
-            name = ".".join((task["task"], task["name"]))
-        else:
-            name = task["task"]
-        if name == job_task:
-            return task
 
 
 def get_yaml(o):

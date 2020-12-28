@@ -2,7 +2,6 @@ import datetime
 import functools
 import glob
 import os
-import yaml
 
 
 import saddle.func
@@ -48,7 +47,7 @@ def choose_job_env(mule_job_env):
 
 
 def get_agent_configs(mule_config, jobs):
-    agent_configs = saddle.util.get_all_agent_configs(mule_config.get("agents", []), jobs)
+    agent_configs = {agent.get("name"): agent for agent in mule_config.get("agents", [])}
     if agent_configs:
         agents_names = list({task.get("agent") for task in get_task_configs(mule_config, jobs) if task.get("agent")})
         return [agent_configs.get(name) for name in agents_names]
@@ -56,9 +55,35 @@ def get_agent_configs(mule_config, jobs):
         return []
 
 
+def get_env_union(agents):
+    # This is used twice:
+    #   1. To avoid duplicate env vars, we collect the agents' envs
+    #      into a set in case the agents share env vars.
+    #   2. For individual agent to convert a list to a dict
+    #      (`env` blocks can be defined as either lists or dicts).
+    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
+
+
 def get_jobs(mule_yaml):
     jobs = saddle.util.cmd_results(["mule", "-f", saddle.func.first(mule_yaml), "--list-jobs"])
     return list(filter(warnings, jobs.split("\n")))
+
+
+def get_env(fields):
+    if len(fields["agents"]):
+        mule_job_env = get_env_union(fields.get("agents"))
+        fields["env"] = choose_job_env(mule_job_env)
+    else:
+        fields["env"] = []
+    return fields
+
+
+def get_fields(mule_config, jobs):
+    return {
+        "filename": saddle.util.create_abs_path_filename(mule_config.get("filename")),
+        "jobs": jobs,
+        "agents": get_agent_configs(mule_config, jobs)
+    }
 
 
 def get_list_item(items, n):
@@ -75,21 +100,14 @@ def get_mule_files():
     return yamls
 
 
-def get_env(fields):
-    if len(fields["agents"]):
-        mule_job_env = saddle.util.get_env_union(fields.get("agents"))
-        fields["env"] = choose_job_env(mule_job_env)
-    else:
-        fields["env"] = []
-    return fields
-
-
-def get_fields(mule_config, jobs):
-    return {
-        "filename": saddle.util.create_abs_path_filename(mule_config.get("filename")),
-        "jobs": jobs,
-        "agents": get_agent_configs(mule_config, jobs)
-    }
+def get_task(mule_config, job_task):
+    for task in mule_config["tasks"]:
+        if "name" in task:
+            name = ".".join((task["task"], task["name"]))
+        else:
+            name = task["task"]
+        if name == job_task:
+            return task
 
 
 def get_task_configs(mule_config, jobs):
@@ -98,10 +116,10 @@ def get_task_configs(mule_config, jobs):
     for job in jobs:
         tasks = mule_config.get("jobs").get(job).get("tasks", [])
         for job_task in tasks:
-            task = saddle.util.get_task(mule_config, job_task)
+            task = get_task(mule_config, job_task)
             task_configs.append(task)
             for dependency in task.get("dependencies", []):
-                task = saddle.util.get_task(mule_config, dependency)
+                task = get_task(mule_config, dependency)
                 task_configs.append(task)
     return task_configs
 
