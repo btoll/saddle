@@ -17,13 +17,13 @@ def _validate(f):
             # All jobs were selected so return the entire list.
             return items
         else:
-            return list(map(functools.partial(get_list_item, items), choice))
+            return list(map(functools.partial(_get_list_item, items), choice))
     return wrap
 
 
 @_validate
-def choose_input(name, items):
-    for item in list_items(items):
+def _choose_input(name, items):
+    for item in _list_items(items):
         print(item)
     print(f"\n( To select all {name}, enter in 1 more than the highest-numbered item. )")
     choice = input(f"\nChoose {name}: ")
@@ -31,7 +31,7 @@ def choose_input(name, items):
     return list(map(int, choice.split(",")))
 
 
-def choose_job_env(mule_job_env):
+def _choose_job_env(mule_job_env):
     print(f"Environment variables for job:\n")
     env_state = {}
     for key, value in mule_job_env.items():
@@ -46,16 +46,16 @@ def choose_job_env(mule_job_env):
     return env_state
 
 
-def get_agent_configs(mule_config, jobs):
+def _get_agent_configs(mule_config, jobs):
     agent_configs = {agent.get("name"): agent for agent in mule_config.get("agents", [])}
     if agent_configs:
-        agents_names = list({task.get("agent") for task in get_task_configs(mule_config, jobs) if task.get("agent")})
+        agents_names = list({task.get("agent") for task in _get_task_configs(mule_config, jobs) if task.get("agent")})
         return [agent_configs.get(name) for name in agents_names]
     else:
         return []
 
 
-def get_env_union(agents):
+def _get_env_union(agents):
     # This is used twice:
     #   1. To avoid duplicate env vars, we collect the agents' envs
     #      into a set in case the agents share env vars.
@@ -64,43 +64,43 @@ def get_env_union(agents):
     return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
 
 
-def get_jobs(mule_yaml):
+def _get_jobs(mule_yaml):
     jobs = saddle.util.cmd_results(["mule", "-f", saddle.func.first(mule_yaml), "--list-jobs"])
-    return list(filter(warnings, jobs.split("\n")))
+    return list(filter(_warnings, jobs.split("\n")))
 
 
-def get_env(fields):
+def _get_env(fields):
     if len(fields["agents"]):
-        mule_job_env = get_env_union(fields.get("agents"))
-        fields["env"] = choose_job_env(mule_job_env)
+        mule_job_env = _get_env_union(fields.get("agents"))
+        fields["env"] = _choose_job_env(mule_job_env)
     else:
         fields["env"] = []
     return fields
 
 
-def get_fields(mule_config, jobs):
+def _get_fields(mule_config, jobs):
     return {
         "filename": saddle.util.create_abs_path_filename(mule_config.get("filename")),
         "jobs": jobs,
-        "agents": get_agent_configs(mule_config, jobs)
+        "agents": _get_agent_configs(mule_config, jobs)
     }
 
 
-def get_list_item(items, n):
+def _get_list_item(items, n):
     if 0 < n <= len(items):
         return items[n - 1]
     else:
         raise ValueError(f"Selection `{n}` out of range")
 
 
-def get_mule_files():
-    yamls = list(filter(magic_number, glob.glob("*.yaml")))
+def _get_mule_files():
+    yamls = list(filter(_magic_number, glob.glob("*.yaml")))
     if not len(yamls):
         raise Exception(f"No `mule` files found in {os.getcwd()}>")
     return yamls
 
 
-def get_task(mule_config, job_task):
+def _get_task(mule_config, job_task):
     for task in mule_config["tasks"]:
         if "name" in task:
             name = ".".join((task["task"], task["name"]))
@@ -110,30 +110,35 @@ def get_task(mule_config, job_task):
             return task
 
 
-def get_task_configs(mule_config, jobs):
+def _get_task_configs(mule_config, jobs):
     # Should we be checking for jobs at this point or assuming we're good?
     task_configs = []
     for job in jobs:
         tasks = mule_config.get("jobs").get(job).get("tasks", [])
         for job_task in tasks:
-            task = get_task(mule_config, job_task)
+            task = _get_task(mule_config, job_task)
             task_configs.append(task)
             for dependency in task.get("dependencies", []):
-                task = get_task(mule_config, dependency)
+                task = _get_task(mule_config, dependency)
                 task_configs.append(task)
     return task_configs
 
 
-def list_items(items):
+def _init():
+    mule_yaml = _get_mule_yaml()
+    return lambda: mule_yaml
+
+
+def _list_items(items):
     return ["{}) {}".format(idx + 1, item) for idx, item in enumerate(items)]
 
 
-def magic_number(filename):
+def _magic_number(filename):
     with open(filename, "r") as fp:
         return fp.read(6) == "#!mule"
 
 
-def make_recipe(fields):
+def _make_recipe(fields):
     return {
         "created": datetime.datetime.now(),
         "mule_version": saddle.util.cmd_results(["mule", "-v"]),
@@ -143,41 +148,36 @@ def make_recipe(fields):
      }
 
 
-def warnings(item):
+def _warnings(item):
     # Ignore blank lines and `mule` warnings from undefined environment variables.
     return not (not len(item) or item.find("Could not") > -1)
 
 
-choose_file = functools.partial(choose_input, "file")
-choose_job = functools.partial(choose_input, "job")
-get_mule_yaml = saddle.func.compose(choose_file, get_mule_files)
+_choose_file = functools.partial(_choose_input, "file")
+_choose_job = functools.partial(_choose_input, "job")
+_get_mule_yaml = saddle.func.compose(_choose_file, _get_mule_files)
 
 
-def init():
-    mule_yaml = get_mule_yaml()
-    return lambda: mule_yaml
-
-
-def main():
-    get_mule_filename = init()
+def write():
+    get_mule_filename = _init()
     get_config = saddle.func.compose(
             saddle.util.get_mule_config,
             saddle.func.first,
             get_mule_filename)
 
     get_mule_jobs = saddle.func.compose(
-            choose_job,
-            get_jobs,
+            _choose_job,
+            _get_jobs,
             get_mule_filename)
 
     get_recipe_env = saddle.func.compose(
-            get_env,
-            functools.partial(get_fields, get_config()),
+            _get_env,
+            functools.partial(_get_fields, get_config()),
             get_mule_jobs)
 
-    write_job = saddle.func.compose(
+    _write = saddle.func.compose(
             saddle.util.write_recipe,
-            make_recipe,
+            _make_recipe,
             get_recipe_env)
 
-    write_job()
+    _write()

@@ -6,6 +6,25 @@ import os
 import saddle.util
 
 
+def _get_env_union(agents):
+    # This is used twice:
+    #   1. To avoid duplicate env vars, we collect the agents' envs
+    #      into a set in case the agents share env vars.
+    #   2. For individual agent to convert a list to a dict
+    #      (`env` blocks can be defined as either lists or dicts).
+    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
+
+
+def _get_task(mule_config, job_task):
+    for task in mule_config["tasks"]:
+        if "name" in task:
+            name = ".".join((task["task"], task["name"]))
+        else:
+            name = task["task"]
+        if name == job_task:
+            return task
+
+
 def compile(stream, to_yaml=True):
     recipe = saddle.util.load_yaml(stream)
     state = get_compiled_state(
@@ -14,13 +33,6 @@ def compile(stream, to_yaml=True):
             recipe.get("jobs")
         ), recipe)
     return saddle.util.get_yaml(state) if to_yaml else state
-
-
-def get_all_agent_configs(mule_agents, jobs):
-    if len(mule_agents):
-        return {agent.get("name"): agent for agent in mule_agents}
-    else:
-        return {}
 
 
 def get_compiled_state(jobs_state, recipe):
@@ -41,20 +53,11 @@ def get_compiled_state(jobs_state, recipe):
         if agent.get("env"):
             # Agent env blocks could be either lists or dicts. We only want
             # to work with the latter.
-            agent_env = agent if type(agent["env"]) is dict else get_env_union([agent])
+            agent_env = agent if type(agent["env"]) is dict else _get_env_union([agent])
             # We only want truthy values (no empty strings). These will then
             # be looked up from our unique (non-duplicates) `env` dict.
             agent["env"] = {key: env.get(key) for key in agent_env.keys() if key in env and env.get(key)}
     return state
-
-
-def get_env_union(agents):
-    # This is used twice:
-    #   1. To avoid duplicate env vars, we collect the agents' envs
-    #      into a set in case the agents share env vars.
-    #   2. For individual agent to convert a list to a dict
-    #      (`env` blocks can be defined as either lists or dicts).
-    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
 
 
 def get_jobs_state(mule_config, jobs):
@@ -68,10 +71,10 @@ def get_jobs_state(mule_config, jobs):
         job_configs = job_def.get("configs", {})
         tasks = job_def.get("tasks", [])
         for job_task in tasks:
-            task = get_task(mule_config, job_task)
+            task = _get_task(mule_config, job_task)
             task_configs.append(task)
             for dependency in task.get("dependencies", []):
-                task = get_task(mule_config, dependency)
+                task = _get_task(mule_config, dependency)
                 task_configs.append(task)
         # TODO: Check for agents?
         agents_names = list({task.get("agent") for task in task_configs if task.get("agent")})
@@ -85,13 +88,3 @@ def get_jobs_state(mule_config, jobs):
             "task_configs": copy.deepcopy(task_configs)
         })
     return job_state
-
-
-def get_task(mule_config, job_task):
-    for task in mule_config["tasks"]:
-        if "name" in task:
-            name = ".".join((task["task"], task["name"]))
-        else:
-            name = task["task"]
-        if name == job_task:
-            return task

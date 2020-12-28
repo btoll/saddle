@@ -26,7 +26,7 @@ def main():
         else:
             saddle.util.write_recipe(compile(args.recipe, to_yaml=False))
     else:
-        saddle.recipe.main()
+        saddle.recipe.write()
 
 
 if __name__ == "__main__":
