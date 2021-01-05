@@ -3,6 +3,8 @@ import datetime
 import os
 
 
+from mule.mule import get_version
+
 import saddle.util
 
 
@@ -38,7 +40,7 @@ def compile(stream, to_yaml=True):
 def get_compiled_state(jobs_state, recipe):
     state = {
         "created": datetime.datetime.now(),
-        "mule_version": saddle.util.cmd_results(["mule", "-v"]),
+        "mule_version": get_version(),
         # TODO: Figure out a better way to do this!
         "filename": "/".join((os.getcwd(), jobs_state[0].get("filename"))),
         "items": []

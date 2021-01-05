@@ -5,21 +5,6 @@ import subprocess
 import yaml
 
 
-def _charset(charset):
-    def decoder(f):
-        @functools.wraps(f)
-        def wrap(*args):
-            out = f(*args)
-            return out.decode(charset)
-        return wrap
-    return decoder
-
-
-@_charset("utf8")
-def cmd_results(cmd):
-    return subprocess.check_output(cmd).strip()
-
-
 def create_abs_path_filename(filename):
     return "/".join((os.getcwd(), filename))
 

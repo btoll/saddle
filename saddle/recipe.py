@@ -4,6 +4,9 @@ import glob
 import os
 
 
+from mule.mule import get_configs, get_version, list_jobs
+
+
 import saddle.func
 import saddle.util
 
@@ -53,12 +56,21 @@ def _get_env_union(agents):
     #      into a set in case the agents share env vars.
     #   2. For individual agent to convert a list to a dict
     #      (`env` blocks can be defined as either lists or dicts).
-    return {env.split("=")[0]: env.split("=")[1] for agent in agents for env in agent["env"]}
+    union = {}
+    for agent in agents:
+        if type(agent.get("env")) is dict:
+            for k, v in agent.get("env").items():
+                union[k] = v
+        else:
+            for env in agent.get("env"):
+                parts = env.split("=")
+                union[parts[0]] = parts[1]
+    return union
 
 
 def _get_jobs(mule_yaml):
-    jobs = saddle.util.cmd_results(["mule", "-f", saddle.func.first(mule_yaml), "--list-jobs"])
-    return list(filter(_warnings, jobs.split("\n")))
+    config = get_configs(mule_yaml, raw=True)
+    return list_jobs(config.get("jobs"))
 
 
 def _get_env(fields):
@@ -136,16 +148,11 @@ def _magic_number(filename):
 def _make_recipe(fields):
     return {
         "created": datetime.datetime.now(),
-        "mule_version": saddle.util.cmd_results(["mule", "-v"]),
+        "mule_version": get_version(),
         "filename": fields.get("filename"),
         "jobs": fields.get("jobs"),
         "env": fields.get("env")
      }
-
-
-def _warnings(item):
-    # Ignore blank lines and `mule` warnings from undefined environment variables.
-    return not (not len(item) or item.find("Could not") > -1)
 
 
 _choose_file = functools.partial(_choose_input, "file")
