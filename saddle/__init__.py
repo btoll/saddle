@@ -7,12 +7,6 @@ import saddle.recipe
 import saddle.util
 
 
-# Note!!!
-# We're not importing `mulecli` because it's not yet ready to work as a library.
-# Instead, we're having to call the `mule` binary and do some futzing with the
-# results in order to work with them.
-
-
 parser = argparse.ArgumentParser()
 parser.add_argument("-r", "--recipe", help="Compile from recipe", type=argparse.FileType("r"))
 parser.add_argument("-s", "--stdout", help="Write to stdout", action="store_true")
