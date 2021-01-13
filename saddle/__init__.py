@@ -24,7 +24,7 @@ def main():
         if args.stdout:
             print(saddle.compiler.compile(args.recipe))
         else:
-            saddle.util.write_recipe(compile(args.recipe, to_yaml=False))
+            saddle.util.write_recipe(saddle.compiler.compile(args.recipe, to_yaml=False))
     else:
         saddle.recipe.write()
 
