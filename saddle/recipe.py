@@ -91,7 +91,8 @@ def _get_fields(mule_config, jobs):
         agents = []
 
     return {
-        "filename": saddle.util.create_abs_path_filename(mule_config.get("filename")),
+            #        "filename": saddle.util.create_abs_path_filename(mule_config.get("filename")),
+        "filename": mule_config.get('filename'),
         "jobs": jobs,
         "agents": agents
     }
