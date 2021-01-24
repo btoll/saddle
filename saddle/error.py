@@ -1,0 +1,2 @@
+class MuleFilesNotFound(FileNotFoundError):
+    pass

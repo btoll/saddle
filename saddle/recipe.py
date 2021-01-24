@@ -7,6 +7,7 @@ import os
 from mule.mule import get_configs, get_version, list_jobs
 
 
+from saddle.error import MuleFilesNotFound
 import saddle.func
 import saddle.util
 
@@ -102,13 +103,13 @@ def _get_list_item(items, n):
     if 0 < n <= len(items):
         return items[n - 1]
     else:
-        raise ValueError(f"Selection `{n}` out of range")
+        raise IndexError(f"[ERROR] Item selection `{n}` out of range")
 
 
 def _get_mule_files():
     yamls = list(filter(_magic_number, glob.glob("*.yaml")))
     if not len(yamls):
-        raise Exception(f"No `mule` files found in {os.getcwd()}>")
+        raise MuleFilesNotFound(f"[FATAL] No `mule` files found in {os.getcwd()} (a `mule` file has `#!mule` as its first line).")
     return yamls
 
 
@@ -162,25 +163,29 @@ _get_mule_yaml = saddle.func.compose(_choose_file, _get_mule_files)
 
 
 def write():
-    get_mule_filename = _init()
-    get_config = saddle.func.compose(
-            saddle.util.get_mule_config,
-            saddle.func.first,
-            get_mule_filename)
+    try:
+        get_mule_filename = _init()
 
-    get_mule_jobs = saddle.func.compose(
-            _choose_job,
-            _get_jobs,
-            get_mule_filename)
+        get_config = saddle.func.compose(
+                saddle.util.get_mule_config,
+                saddle.func.first,
+                get_mule_filename)
 
-    get_recipe_env = saddle.func.compose(
-            _get_env,
-            functools.partial(_get_fields, get_config()),
-            get_mule_jobs)
+        get_mule_jobs = saddle.func.compose(
+                _choose_job,
+                _get_jobs,
+                get_mule_filename)
 
-    _write = saddle.func.compose(
-            saddle.util.write_recipe,
-            _make_recipe,
-            get_recipe_env)
+        get_recipe_env = saddle.func.compose(
+                _get_env,
+                functools.partial(_get_fields, get_config()),
+                get_mule_jobs)
 
-    _write()
+        _write = saddle.func.compose(
+                saddle.util.write_recipe,
+                _make_recipe,
+                get_recipe_env)
+
+        _write()
+    except (IndexError, MuleFilesNotFound) as err:
+        print(err)
